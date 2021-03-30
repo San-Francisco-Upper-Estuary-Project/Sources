@@ -1,0 +1,35 @@
+---
+title: "Precipitation"
+author: "Erika W"
+date: "3/30/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Precipitation
+
+### Data
+
+In October 2020, Steven Eikenbary created a 4x4km grid of the SF delta study area in ArcMap, and retrieved the lat/longs of the center points in each grid. Those coordinates can be found at:
+
+URL
+
+On October 26, 2020, precipitation data was downloaded from PRISM for that grid of coordinates (n=33) using the multiple sites downloader: https://prism.oregonstate.edu/explorer/bulk.php
+
+Data were downloaded for every water year between 2009 through 2019, for all locations within the grid.
+
+The spatial resolution of the data is 4km, and it was sourced from the AN81d dataset. Precipitation includes rainfall + melted snowfall. Additional details about the data can be found at: http://www.prism.oregonstate.edu/documents/PRISM_datasets.pdf
+
+```{r}
+df2009 <- read.csv("")
+
+```
+
+### Filtering
+
+Once I had that I filtered by daily max and then ran a window looking at when precipitation for a region was greater than 0.25 inches and >0.5 inches for a 24 hour period and then put that signifier on the data points that followed 'wet' precipitation events by 7 days.
+
+The PRISM data manipulation starts around line 195 in the attached R file. It was pretty simple, but I'm sure I'm not doing a great job of explaining it here.
