@@ -9,9 +9,21 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Precipitation
+```{r, message = F}
+library(tidyverse)
+library(data.table)
+library(xts)
+library(sf)
+library(here)
+library(readxl)
+library(RColorBrewer)
+library(zoo)
+library(lubridate)
+library(ggplot2)
+```
+## Load Data
 
-### Data
+### Precipitation
 
 In October 2020, Steven Eikenbary created a 4x4km grid of the SF delta study area in ArcMap, and retrieved the lat/longs of the center points in each grid. Those coordinates can be found at:
 
@@ -23,13 +35,197 @@ Data were downloaded for every water year between 2009 through 2019, for all loc
 
 The spatial resolution of the data is 4km, and it was sourced from the AN81d dataset. Precipitation includes rainfall + melted snowfall. Additional details about the data can be found at: http://www.prism.oregonstate.edu/documents/PRISM_datasets.pdf
 
-```{r}
-df2009 <- read.csv("")
+```{r, message = F, warning = F}
+## Load precip data
+df2010 <- fread("https://github.com/WWU-IETC-R-Collab/Seasonal/raw/master/Data/PRISM_Edited/PRISM_WY2010.csv") %>%
+  mutate(WaterYear = "2010")
+
+df2011 <- fread("https://github.com/WWU-IETC-R-Collab/Seasonal/raw/master/Data/PRISM_Edited/PRISM_WY2011.csv") %>%
+  mutate(WaterYear = "2011")
+
+df2012 <- fread("https://github.com/WWU-IETC-R-Collab/Seasonal/raw/master/Data/PRISM_Edited/PRISM_WY2012.csv")%>%
+  mutate(WaterYear = "2012")
+
+df2013 <- fread("https://github.com/WWU-IETC-R-Collab/Seasonal/raw/master/Data/PRISM_Edited/PRISM_WY2013.csv")%>%
+  mutate(WaterYear = "2013")
+
+df2014 <- fread("https://github.com/WWU-IETC-R-Collab/Seasonal/raw/master/Data/PRISM_Edited/PRISM_WY2014.csv")%>%
+  mutate(WaterYear = "2014")
+
+df2015 <- fread("https://github.com/WWU-IETC-R-Collab/Seasonal/raw/master/Data/PRISM_Edited/PRISM_WY2015.csv")%>%
+  mutate(WaterYear = "2015")
+
+df2016 <- fread("https://github.com/WWU-IETC-R-Collab/Seasonal/raw/master/Data/PRISM_Edited/PRISM_WY2016.csv")%>%
+  mutate(WaterYear = "2016")
+
+df2017 <- fread("https://github.com/WWU-IETC-R-Collab/Seasonal/raw/master/Data/PRISM_Edited/PRISM_WY2017.csv")%>%
+  mutate(WaterYear = "2017")
+
+df2018 <- fread("https://github.com/WWU-IETC-R-Collab/Seasonal/raw/master/Data/PRISM_Edited/PRISM_WY2018.csv")%>%
+  mutate(WaterYear = "2018")
+
+df2019 <- fread("https://github.com/WWU-IETC-R-Collab/Seasonal/raw/master/Data/PRISM_Edited/PRISM_WY2019.csv")%>%
+  mutate(WaterYear = "2019")
 
 ```
 
-### Filtering
+<br/>
 
-Once I had that I filtered by daily max and then ran a window looking at when precipitation for a region was greater than 0.25 inches and >0.5 inches for a 24 hour period and then put that signifier on the data points that followed 'wet' precipitation events by 7 days.
 
-The PRISM data manipulation starts around line 195 in the attached R file. It was pretty simple, but I'm sure I'm not doing a great job of explaining it here.
+### USFE Risk Regions
+```{r}
+# Load Risk Regions from GitHub CEDEN repository (change if moved)
+
+USFE.RiskRegions.z <- "https://github.com/WWU-IETC-R-Collab/CEDEN-mod/raw/main/Data/USFE_RiskRegions_9292020.zip"
+
+unzip_shape <- function(InputShapeZip){
+  dl.temp <- tempfile() # Create local temp file for zipped shapefile
+  dl.temp2 <- tempfile() # Create a second local temp file to store unzipped shapefile
+  download.file(InputShapeZip, dl.temp, quiet=T) # Downloads zip file from InputShape
+  unzip(zip = dl.temp, exdir = dl.temp2) # Unzips zip file
+  shapefile.out <-list.files(dl.temp2, pattern = ".shp$",full.names=TRUE) # stores file path of files with .shp ext in dl.temp2
+  sf::st_read(shapefile.out) # Reads shapefile as sf object
+}
+
+USFE.RiskRegions <- unzip_shape(USFE.RiskRegions.z) # CRS is WGS 84
+```
+
+<br/>
+
+### CEDENSURF
+
+```{r}
+CEDENSURFMod <- fread("https://github.com/WWU-IETC-R-Collab/CEDENSURF-mod/raw/main/Data/Output/CEDENSURFMod.csv")
+```
+
+<br/>
+<br/>
+
+## Data Prep
+
+1. Combine water years
+2. Make shapefile
+3. Join to risk regions
+4. Summarize precipitation by risk region
+*Steven had summarised precip using MAX - why not mean?*
+
+```{r, message = F, warning = F}
+## Combine data
+
+AllWY <- rbind(df2010, df2011, df2012, df2013,
+               df2014, df2015, df2016, df2017,
+               df2018, df2019)
+
+rm(df2010, df2011, df2012, df2013,
+   df2014, df2015, df2016,df2017,
+   df2018, df2019) # clean up global environment
+
+## Modify data
+
+AllWY<- AllWY %>%
+  mutate_if(is.integer, as.numeric) %>%
+  mutate(Date = as.Date(AllWY$Date, "%m/%d/%Y")) %>%
+  filter(!is.na(Date))
+
+## Create zoo
+
+AllWY.zoo <-zoo(AllWY, as.Date(AllWY$Date))
+
+## Create sf
+
+AllWY.sf <- st_as_sf(AllWY, coords = c("Longitude", "Latitude"), remove = F, crs = "WGS84")
+
+## Join to Risk Regions
+
+AllWY.sf <- st_join(AllWY.sf, USFE.RiskRegions[1], left = T) %>%
+  filter(!is.na(Subregion)) 
+
+AllWY <- AllWY.sf %>% st_set_geometry(NULL)
+
+```
+
+
+```{r, message = F, warning = F}
+## Summarize precip by dates within each RR.
+AllWY_max <- AllWY %>%
+  group_by(Date, Subregion, WaterYear) %>%
+  summarize(max_precip = max(ppt_in))
+```
+
+## Define Seasons
+
+**What qualifies as the wet season?**
+
+In each region I observed, November - March appeared to be the wettest seasons
+
+According to Alameda WETS tables, during those months
+
+- At the inland edge of the estuary, average monthly precip is only 2.5-3" (< 0.1" per day)
+
+- At the SE border of our study area, average monthly precip is only 1.5 - 2" (<0.07"/day)
+
+*Question what are stronger predictors of water quality parameters?*
+
+Daily water volume definitions
+A. Wet being >0.1" in a day
+B. Wet being >0.2" in a day *(current)*
+
+Date buffer definitions
+A. 7 days *(current)*
+B. 3 days 
+
+**Current process**
+
+Moving forward with Wet being within 7 days of a day with rain event >= 0.2", I added a column to CEDENSURF defining Season
+
+```{r}
+wet_event.2 <- subset(AllWY_max, max_precip >= 0.2)
+
+# Create new DF that expands data 7 days past each measure
+
+oneweek <- wet_event.2 %>% 
+  group_by(Date, Subregion) %>% 
+  complete(Date = seq.Date((Date), (Date+7), by = 'days'))
+```
+
+## Join Seasons to CEDENSURF data
+
+```{r}
+# Join CEDENSURF to AllWY_max
+
+CS_PRISM<- merge(CEDENSURFMod, AllWY_max[,c("Date", "max_precip", "Subregion", "WaterYear")], by = c("Date", "Subregion"))
+  
+# Subset and define wet period
+
+CS_wet <- subset(CS_PRISM, Date %in% oneweek$Date)
+CS_wet$Season <- "wet"
+
+# Subset and define dry period
+
+CS_dry <- subset(CS_PRISM, !(Date %in% oneweek$Date))
+CS_dry$Season <- "dry"
+
+# Bind back together
+
+CS_PRISM <- rbind(CS_wet, CS_dry)
+
+# Checked before and after subsets/recreation, and total records remains 210208
+```
+
+### Prepare for NETICA
+
+Values should match how they will appear in NETICA (right?)
+
+Region
+Season
+
+```{r}
+CS_PRISM <- CS_PRISM %>% 
+  mutate(Region = Subregion) %>%
+  mutate(Region = str_replace(Region, "Central Delta", "Central")) %>%
+  mutate(Region = str_replace(Region, "North Delta", "North")) %>%
+  mutate(Region = str_replace(Region, "Sacramento River", "Sacramento")) %>%
+  mutate(Region = str_replace(Region, "South Delta", "South")) %>%
+  mutate(Region = str_replace(Region, "Suisun Bay", "Suisun"))
+```
+

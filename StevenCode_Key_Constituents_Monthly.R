@@ -16,6 +16,7 @@ library(RColorBrewer)
 library(zoo)
 library(lubridate)
 library(ggplot2)
+
 #############
 #DAYFLOW
 #############
@@ -138,10 +139,13 @@ AllWY_max.df <- as.data.frame(AllWY_max)
 # Chinook
 #############
 fish <- read.csv("G:\\Upper San Francisco Project\\Data\\Fish\\Delta_Fish_Last_10_WY\\For_R\\AllFishData_NO_NAs_20200831.csv")
+
 CHN <- subset(fish,Organism=="CHN")
 CHN.all.ts <- xts(CHN$Count, as.Date(CHN$Date, "%Y-%m-%d"))
+
 # convert daily data
 CHN.all.ts_d = apply.daily(CHN.all.ts, FUN=sum)
+
 #str(CHN.all.ts_m);head(CHN.all.ts_m)
 CHN.df <- as.data.frame(CHN.all.ts_d)
 CHN.df["Date"] <- NA
