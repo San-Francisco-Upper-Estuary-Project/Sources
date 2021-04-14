@@ -74,7 +74,7 @@ USFE.RiskRegions <- unzip_shape(USFE.RiskRegions.z) # CRS is WGS 84
 ```
 
 ```
-## Reading layer `RiskRegions_DWSC_Update_9292020' from data source `C:\Users\Erika\AppData\Local\Temp\RtmpGQLHMh\file1bd84c084629\RiskRegions_DWSC_Update_9292020.shp' using driver `ESRI Shapefile'
+## Reading layer `RiskRegions_DWSC_Update_9292020' from data source `C:\Users\Erika\AppData\Local\Temp\RtmpoxfOvF\fileb243e1e67c0\RiskRegions_DWSC_Update_9292020.shp' using driver `ESRI Shapefile'
 ## Simple feature collection with 6 features and 6 fields
 ## geometry type:  POLYGON
 ## dimension:      XYZ
@@ -193,10 +193,10 @@ for(i in 1:6){
   complete(Date = seq.Date((Date), (Date+7), by = 'days'))
 
   PRISM_wet <- subset(m, Date %in% oneweek$Date)
-  PRISM_wet$Season.1 <- "wet"
+  PRISM_wet$Season01 <- "wet"
   
   PRISM_dry <- subset(m, !(Date %in% oneweek$Date))
-  PRISM_dry$Season.1 <- "dry"
+  PRISM_dry$Season01 <- "dry"
   
   result[[i]]<-rbind(PRISM_wet, PRISM_dry)
   }
@@ -219,16 +219,16 @@ boxplot(max_precip ~ Month, data = AllWY_max)
 
 ```r
 AllWY_max %>% 
-  group_by(Month, Season.1, Subregion) %>%
+  group_by(Month, Season01, Subregion) %>%
   summarize(Subregion = first(Subregion),
             Sum = n()) %>%
-  pivot_wider(names_from = Season.1,
+  pivot_wider(names_from = Season01,
               names_repair = "check_unique",
               values_from = Sum) # Values to fill columns
 ```
 
 ```
-## `summarise()` has grouped output by 'Month', 'Season.1'. You can override using the `.groups` argument.
+## `summarise()` has grouped output by 'Month', 'Season01'. You can override using the `.groups` argument.
 ```
 
 ```
@@ -251,9 +251,9 @@ AllWY_max %>%
 
 ```r
 AllWY_max %>% 
-  group_by(Month, Season.1) %>%
+  group_by(Month, Season01) %>%
   summarize(Sum = n()) %>%
-  pivot_wider(names_from = Season.1,
+  pivot_wider(names_from = Season01,
               names_repair = "check_unique",
               values_from = Sum) # Values to fill columns
 ```
@@ -329,10 +329,10 @@ for(i in 1:6){
   complete(Date = seq.Date((Date), (Date+7), by = 'days')) # fills 7 days beyond each 'wet' date
 
   PRISM_wet <- subset(m, Date %in% oneweek$Date)
-  PRISM_wet$Season.r <- "wet"
+  PRISM_wet$Seasonr <- "wet"
   
   PRISM_dry <- subset(m, !(Date %in% oneweek$Date))
-  PRISM_dry$Season.r <- "dry"
+  PRISM_dry$Seasonr <- "dry"
   
   result[[i]]<-rbind(PRISM_wet, PRISM_dry)
   }
@@ -355,16 +355,16 @@ boxplot(max_precip ~ Month, data = AllWY_max)
 
 ```r
 AllWY_max %>% 
-  group_by(Month, Season.r, Subregion) %>%
+  group_by(Month, Seasonr, Subregion) %>%
   summarize(Subregion = first(Subregion),
             Sum = n()) %>%
-  pivot_wider(names_from = Season.r,
+  pivot_wider(names_from = Seasonr,
               names_repair = "check_unique",
               values_from = Sum) # Values to fill columns
 ```
 
 ```
-## `summarise()` has grouped output by 'Month', 'Season.r'. You can override using the `.groups` argument.
+## `summarise()` has grouped output by 'Month', 'Seasonr'. You can override using the `.groups` argument.
 ```
 
 ```
@@ -387,9 +387,9 @@ AllWY_max %>%
 
 ```r
 AllWY_max %>% 
-  group_by(Month, Season.r) %>%
+  group_by(Month, Seasonr) %>%
   summarize(Sum = n()) %>%
-  pivot_wider(names_from = Season.r,
+  pivot_wider(names_from = Seasonr,
               names_repair = "check_unique",
               values_from = Sum) # Values to fill columns
 ```
@@ -432,7 +432,9 @@ The process used to prepare the data is:
     * Region - change to names w/o spaces
     * NA --> *
 
-3. Save as txt
+3. Save as csv, then save-as txt.
+
+(Writing directly to txt file does not play nice with Netica... Save as CSV then "save-as" txt)
 
 ### Sediment
 
@@ -473,8 +475,6 @@ ForNetica <- mutate_all(ForNetica, ~replace(., is.na(.), "*"))
 
 write.csv(x = ForNetica, file = "Data/Output/AllSed_ForNetica.csv", 
           row.names = F)
-
-write.table(x = ForNetica, file = "Data/Output/AllSed_ForNetica.txt", sep = "")
 ```
 
 ### Water 
@@ -518,7 +518,9 @@ ForNetica <- mutate_all(ForNetica, ~replace(., is.na(.), "*"))
 write.csv(x = ForNetica, file = "Data/Output/AllWater_ForNetica.csv", 
           row.names = F)
 
-write.table(x = ForNetica, file = "Data/Output/AllWater_ForNetica.txt", sep = "")
+# Writing directly to txt file does not play nice with Netica... Save as CSV then "save-as" txt
+
+# write.table(x = ForNetica, file = "Data/Output/AllWater_ForNetica.txt", sep = "")
 ```
 
 ### Mini 
@@ -562,7 +564,9 @@ ForNetica <- mutate_all(ForNetica, ~replace(., is.na(.), "*"))
 write.csv(x = ForNetica, file = "Data/Output/WQP_ForNetica.csv", 
           row.names = F)
 
-write.table(x = ForNetica, file = "Data/Output/WQP_ForNetica.txt", sep = "")
+# Writing directly to txt file does not play nice with Netica... Save as CSV then "save-as" txt
+
+# write.table(x = ForNetica, file = "Data/Output/WQP_ForNetica.txt", sep = "")
 ```
 
 **On a Windows, Netica should be able to use the csv file directly. I found that in order for it to allocate continuously variables appropriately into the designated bins (ie: when MANY nodes were in one document), it needed to be a txt file. Re-saving the csv as txt worked fine, I also added code here to write directly to txt. **
