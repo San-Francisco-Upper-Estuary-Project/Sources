@@ -74,7 +74,7 @@ USFE.RiskRegions <- unzip_shape(USFE.RiskRegions.z) # CRS is WGS 84
 ```
 
 ```
-## Reading layer `RiskRegions_DWSC_Update_9292020' from data source `C:\Users\Erika\AppData\Local\Temp\RtmpoxfOvF\fileb243e1e67c0\RiskRegions_DWSC_Update_9292020.shp' using driver `ESRI Shapefile'
+## Reading layer `RiskRegions_DWSC_Update_9292020' from data source `C:\Users\Erika\AppData\Local\Temp\Rtmpqe6EfM\file15504c4a280\RiskRegions_DWSC_Update_9292020.shp' using driver `ESRI Shapefile'
 ## Simple feature collection with 6 features and 6 fields
 ## geometry type:  POLYGON
 ## dimension:      XYZ
@@ -432,7 +432,7 @@ The process used to prepare the data is:
     * Region - change to names w/o spaces
     * NA --> *
 
-3. Save as csv, then save-as txt.
+3. Save as csv, then save-as tab delimited txt file (*.txt)
 
 (Writing directly to txt file does not play nice with Netica... Save as CSV then "save-as" txt)
 
@@ -441,7 +441,7 @@ The process used to prepare the data is:
 
 ```r
 # Load CEDENSURF Data (wide format)
-Sed_Wide <- fread("https://github.com/WWU-IETC-R-Collab/CEDENSURF-data.splitting/raw/main/Data/Output/Allsed.Wide.csv") 
+Sed_Wide <- fread("https://github.com/WWU-IETC-R-Collab/CEDENSURF-mod/raw/main/Data/Output/Allsed.Wide.csv") 
     
 # Join CEDENSURF to AllWY_max
 CS_PRISM<- merge(Sed_Wide, AllWY_max, by = c("Date", "Subregion"))
@@ -483,7 +483,7 @@ write.csv(x = ForNetica, file = "Data/Output/AllSed_ForNetica.csv",
 ## For example using Water Quality Parameters Subset and my limited-mode netica, I used just the WQP.Wide.water dataset:
 
 # Load CEDENSURF Data (wide format)
-Water_Wide <- fread("https://github.com/WWU-IETC-R-Collab/CEDENSURF-data.splitting/raw/main/Data/Output/Allwater.Wide.csv") 
+Water_Wide <- fread("https://github.com/WWU-IETC-R-Collab/CEDENSURF-mod/raw/main/Data/Output/Allwater.Wide.csv") 
     
 # Join CEDENSURF to AllWY_max
 CS_PRISM<- merge(Water_Wide, AllWY_max, by = c("Date", "Subregion"))
@@ -529,7 +529,7 @@ write.csv(x = ForNetica, file = "Data/Output/AllWater_ForNetica.csv",
 ## For example using Water Quality Parameters Subset and my limited-mode netica, I used just the WQP.Wide.water dataset:
 
 # Load CEDENSURF Data (wide format)
-WQ_Wide <- fread("https://github.com/WWU-IETC-R-Collab/CEDENSURF-data.splitting/raw/main/Data/Output/Subsets/WQP.Wide.water.csv") 
+WQ_Wide <- fread("https://github.com/WWU-IETC-R-Collab/CEDENSURF-mod/raw/main/Data/Output/WideSubsets/WQP.Wide.water.csv") 
     
 # Join CEDENSURF to AllWY_max
 CS_PRISM<- merge(WQ_Wide, AllWY_max, by = c("Date", "Subregion"))
