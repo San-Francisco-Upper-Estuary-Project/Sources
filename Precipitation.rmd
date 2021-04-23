@@ -29,6 +29,7 @@ library(zoo)
 library(lubridate)
 library(ggplot2)
 ```
+
 ## Load Data
 
 ### Precipitation
@@ -78,7 +79,6 @@ df2019 <- fread("https://github.com/WWU-IETC-R-Collab/Seasonal/raw/master/Data/P
 ```
 
 <br/>
-
 
 ### USFE Risk Regions
 ```{r}
