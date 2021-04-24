@@ -119,7 +119,7 @@ CS_PRISM <- CS_PRISM %>%
 
 # Remove unnecessary columns
 
-ForNetica <- CS_PRISM %>% select(!c(Subregion, Latitude, Longitude, Date, WaterYear, max_precip, d14_precipavg))
+ForNetica <- CS_PRISM %>% select(!c(Subregion, Latitude, Longitude, Date, WaterYear,d14_precipavg))
 
 # Replace NA with *, which is how Netica deals with NA
 
@@ -154,7 +154,7 @@ CS_PRISM <- CS_PRISM %>%
 
 # Remove unnecessary columns
 
-ForNetica <- CS_PRISM %>% select(!c(Subregion, Latitude, Longitude, Date, WaterYear, max_precip, d14_precipavg))
+ForNetica <- CS_PRISM %>% select(!c(Subregion, Latitude, Longitude, Date, WaterYear, d14_precipavg))
 
 # Replace NA with *, which is how Netica deals with NA
 
