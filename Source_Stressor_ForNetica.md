@@ -47,7 +47,7 @@ USFE.RiskRegions <- unzip_shape(USFE.RiskRegions.z) # CRS is WGS 84
 ```
 
 ```
-## Reading layer `RiskRegions_DWSC_Update_9292020' from data source `C:\Users\Erika\AppData\Local\Temp\RtmpcDXcOw\file2d3c3e402b2b\RiskRegions_DWSC_Update_9292020.shp' using driver `ESRI Shapefile'
+## Reading layer `RiskRegions_DWSC_Update_9292020' from data source `C:\Users\Erika\AppData\Local\Temp\RtmpqAFP09\file1ab0448372e0\RiskRegions_DWSC_Update_9292020.shp' using driver `ESRI Shapefile'
 ## Simple feature collection with 6 features and 6 fields
 ## geometry type:  POLYGON
 ## dimension:      XYZ
@@ -100,7 +100,7 @@ The process used to prepare the data is:
 
 2. Reformat to meet requirements for Netica
 
-    Values should match how they will appear in NETICA
+Values should match how they will appear in NETICA
     
     * Region - change to names w/o spaces
     * NA --> *

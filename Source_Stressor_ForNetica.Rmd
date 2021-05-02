@@ -87,7 +87,7 @@ The process used to prepare the data is:
 
 2. Reformat to meet requirements for Netica
 
-    Values should match how they will appear in NETICA
+Values should match how they will appear in NETICA
     
     * Region - change to names w/o spaces
     * NA --> *
