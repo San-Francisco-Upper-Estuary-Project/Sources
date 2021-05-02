@@ -1,0 +1,219 @@
+---
+title: "Mutlivariate Analysis"
+author: "Erika Whitney"
+date: "4/23/2021"
+output:
+  html_document:
+    code_folding: show
+    code_download: true
+    keep_md: true
+---
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load in libraries and data
+
+```{r, echo=TRUE, results='hide', warning=FALSE, message=FALSE}
+library(vegan)
+library(MASS)
+library(tidyverse)
+library(sf)
+library(here)
+library(ggcorrplot)
+```
+
+
+```{r, echo=TRUE, results='hide', warning=FALSE, message=FALSE}
+# Read in wide-format data with Source and Stressor both. 
+
+SS_Water <- read_csv("Data/Output/AllWater_ForNetica.csv") %>% na_if(., "*")
+
+# All variables except character v's - some listed as character even though numeric. Fix that.
+SS_Water[c(2:33, 38:39)] <- SS_Water[c(2:33, 38:39)] %>% 
+  mutate_if(is.character,as.numeric) 
+  
+# Define factors
+SS_Water$Region <- as.factor(SS_Water$Region)
+```
+
+## Quality Check
+
+Should all these WQ variables be included in the multivariate analyses? There are many, and some with far more data available than others.
+
+I summarized the df to find how many records of each WQ variable are in the DF.
+
+```{r}
+# There are 5366 rows in the df
+
+SS_Water %>%
+    summarise_if(is.numeric, funs(5366-sum(is.na(.))))
+```
+The WQ variables with the least data are:
+  
+  - diazinon oxon: 14 records
+  - Sodium: 24
+  - Atrazine degradate: 23
+  - fipronil amide: 23
+  
+  - Electrical conductivity: 88 records
+  - diazinon degradate: 95
+  - diazoxon: 186
+  
+  - selenium 246
+  - glyphosate 229
+  - mercury 289
+  
+
+I chose to omit all with <100 records from the analyses. 
+
+```{r}
+SS_Water <- SS_Water %>% select(!c("diazinon_oxon", "sodium", "atrazine_degradate", "fipronil_amide", "electricalconductivity", "diazinon_degradate"))
+```
+
+## Prepare data subsets
+
+```{r, echo = TRUE, warning=FALSE, message=FALSE}
+
+## Subset Stressors (response variables here)
+SS_Stressor <- SS_Water %>% select(!c(Region, Matrix, Seasonr, Season01, Month, PercHighIntens, PercAgri))
+                            
+## Subset Explanatory variables
+SS_Source <- SS_Water %>% select(Region, Matrix, Seasonr, PercHighIntens, PercAgri, max_precip)
+```
+
+## Correlation
+
+With so many NA's, it is pretty difficult to explore this data.
+
+cor() includes an option to dictate to use "pairwise.complete.obs", in which case the correlation or covariance between each pair of variables is computed using all complete pairs of observations on those variables. This can result in covariance or correlation matrices which are not positive semi-definite, as well as NA entries if there are no complete pairs for that pair of variables.
+
+While it can calculate correlation coefficients, there is no way to obtain p-values for all of them. So, for all we know, strong correlations may be due to a lack of data (ie: only one pair observed)
+
+```{r}
+# If there weren't NA's, you could also cluster the correlations! Great examples at: http://www.sthda.com/english/wiki/ggcorrplot-visualization-of-a-correlation-matrix-using-ggplot2
+
+## Subset Numeric
+SS_Num <- SS_Water %>% select(!c(Region, Matrix, Seasonr, Season01))
+
+corr <- round(cor(SS_Num,use = "pairwise.complete.obs"), 1) # Correlation matrix
+
+#p.mat <- cor_pmat(SS_Num,use = "pairwise.complete.obs") # Funct to obtain Matrix of correlation p-values does not work with this data. 
+
+ggcorrplot(corr, type="upper")
+```
+With those caveats in mind, it appears that there are some correlations between the compounds, but hardly any with the stressors (land use)
+
+**Intensive Development**
+Positive w:fipronil_sulfide, fipronil_sulfone,  
+
+**Crop Production**
+Negative cor: Phosphorous (plot twist!), cyfluthrin, mercury, fipronil sulfide and fipronil sulfone, salinity
+
+**Strong Positive:**
+
+  chlorphyrifos: malathion, diazinon
+  diazinon: fipronil, malathion
+  glyphosate: esfenvalerate_fenvalerate, cyfluthrin
+  nitrite: fipronil desulfinyl and fipronil
+  phosphorous: imidacloprid, fipronil_sulfide, fipronil, nitrate, nitrite, mercury, cyfluthrin
+  
+**Strong Negative**
+  fipronil:chlorpyrifos
+  imidacloprid:atrazine
+  phosphorous: fipronil_desulfinyl
+
+```{r, eval = F}
+# Using a function that easily makes table of correlation coefficient and p-value (amazing) BUT it can't handle NA's
+
+# http://www.sthda.com/english/wiki/correlation-matrix-an-r-function-to-do-all-you-need
+
+# source("http://www.sthda.com/upload/rquery_cormat.r")
+# rquery.cormat(SS_Num, use = "pairwise.complete.obs")
+```
+
+## NMDS
+
+Most analyses are not able to run with the amount of NA's in our dataframe. I could exclude values, or average by Month. 
+
+For now, I'm going to try averaging by Month. 
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+SS_WaterMonthly <- SS_Water %>%  
+  group_by(Month, Region, Seasonr) %>%
+  summarise_if(is.numeric, mean, na.rm = TRUE)
+
+summary(SS_WaterMonthly)
+
+```
+
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+v.dist <- vegdist(SS_Water[c(2:26)], na.rm = TRUE)
+
+nmds <- metaMDS(v.dist, na.rm = TRUE)
+nmds
+
+stressplot(nmds, v.dist)
+
+plot(nmds, type = "t", main = "NMDS for Each Sample")
+
+colvec <- c("cyan2", "gold", "red", "blue")
+plot(nmds, type = "n", main = "NMDS Stressors by Risk Region")
+with(SS_Water, points(nmds, display = "sites", col = colvec[Region],
+                  pch = 21, bg = colvec[Region]))
+with(SS_Water, legend("topright", legend = levels(Region), bty = "n", col = colvec, pch = 21, pt.bg = colvec))
+
+```
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+est <- as.factor(taxa$Subregion.x)
+results <- (anosim(v.dist, grouping = est))
+summary(results)
+plot(results, ylab = "Ranked dissimilarity")
+```
+
+## WQ Vectors
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+vare.pca <- rda(taxa[4:22])
+vare.pca
+
+plot(vare.pca)
+
+biplot(vare.pca, scaling = -1)
+
+```
+
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+env <- as.data.frame(env)
+
+ef <- envfit(nmds, env[4:7], na.rm = TRUE, permutations = 999)
+ef
+
+scores(ef, "vectors")
+
+plot(nmds, type = "t", scale = -1)
+plot(ef, scale = -1)
+
+plot(nmds, type = "n", main = "NMDS with WQ vectors", scale = -1)
+with(taxa, points(nmds, display = "sites", col = colvec[Subregion.x],
+                  pch = 21, bg = colvec[Subregion.x]))
+with(taxa, legend("topright", legend = levels(Subregion.x), bty = "n", col = colvec, pch = 21, pt.bg = colvec))
+plot(ef, scale = -1)
+```
+
+
+## What WQ parameters vary with season?
+
+LDA to explore which variables are most important in differentiating among groups
+
+```{r}
+SS_Water$Seasonr <- as.factor(SS_Water$Seasonr)
+
+seasonr_lda <- lda(SS_Stressor, grouping = SS_Water$Seasonr, na.pass)
+
+```
+
