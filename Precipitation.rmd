@@ -100,18 +100,6 @@ USFE.RiskRegions <- unzip_shape(USFE.RiskRegions.z) # CRS is WGS 84
 
 <br/>
 
-### CEDENSURF
-
-I have read in the combined modified CEDEN and SURF data, but I believe that it may be most useful to jump right to the wide format data...
-
-```{r}
-CEDENSURFMod <- fread("https://github.com/WWU-IETC-R-Collab/CEDENSURF-mod/raw/main/Data/Output/CEDENSURFMod.csv")
-
-```
-
-<br/>
-<br/>
-
 ## Data Prep
 
 1. Combine water years
@@ -131,7 +119,7 @@ rm(df2010, df2011, df2012, df2013,
    df2014, df2015, df2016,df2017,
    df2018, df2019) # clean up global environment
 
-## Modify data
+## Correct Date Format
 
 AllWY<- AllWY %>%
   mutate(Date = as.Date(AllWY$Date, "%m/%d/%Y")) %>%
@@ -155,11 +143,34 @@ AllWY <- AllWY.sf %>% st_set_geometry(NULL)
 ```
 
 ```{r, message = F, warning = F}
+
+# Add month column
+AllWY <- AllWY %>% mutate(Month = month(Date)) %>%
+  mutate(Month = as.factor(Month))
+
+## Calculate Max Monthly rainfall for each RR
+  #  monthly rainfall at each station*Year*Mon
+  Monthly <- AllWY %>% 
+  group_by(Month, WaterYear, Name) %>%
+  summarize(MonthlyPrecip = sum(ppt_in),
+            Subregion = first(Subregion))
+
+  # monthly rainfall max within each RR
+  Monthly <- Monthly %>%
+  group_by(Month, Subregion, WaterYear) %>%
+  summarize(monthlymax_precip = max(MonthlyPrecip))
+
 ## Summarize precip by dates within each RR.
 AllWY_max <- AllWY %>%
   group_by(Date, Subregion, WaterYear) %>%
-  summarize(max_precip = max(ppt_in))
+  summarize(dailymax_precip = max(ppt_in))
+
+# Clean up workspace
+rm(list=setdiff(ls(), c("AllWY_max", "Monthly")))
 ```
+
+<br/>
+<br/>
 
 ## Define Seasons
 
@@ -169,25 +180,156 @@ In each region I observed, November - March appeared to be the wettest seasons
 
 According to Alameda WETS tables, during those months
 
-- At the inland edge of the estuary, average monthly precip is only 2.5-3" (< 0.1" per day)
+- At the inland edge of the estuary, average monthly precip is only 2 - 3" (< 0.06" per day)
 
-- At the SE border of our study area, average monthly precip is only 1.5 - 2" (<0.07"/day)
+- At the SE border of our study area, average monthly precip is only 1 - 2" (<0.03"/day)
 
 *Question: what are stronger predictors of water quality parameters?*
 
 Daily water volume definitions
-A. Wet being >0.1" in a day *(current)*
-B. Wet being >0.2" in a day 
+A. Wet being >0.05" in a day *(current)*
+B. Wet being >0.1" in a day 
 
 Date buffer definitions
 A. 7 days  *(current)*
 B. 3 days
 
-**Current process**
-
 Moving forward with Wet being within 7 days of a day with rain event >= 0.05", I added a column to CEDENSURF defining Season.
 
-By changing Stevens code to be a loop, it allowed wet vs dry season to be defined differently for each region on a given date.
+By changing Stevens code to be a loop, it allowed wet vs dry season to be defined differently for each region on a given date (since rainfall varies across the region)
+
+### Seasons via rolling average
+
+I think that it may make most sense to allow a rolling average to be used to reduce incursions of "dry" season within "wet" seasons and vice versa.
+
+The following code does three things
+1. Calculate a 14-day rolling average (center window) of precipitation within each region
+2. Repeat the same 0.05 mm precip definition as a 'wet event', and added the same 7 day buffer to each wet event.
+
+```{r}
+## Create column d14_precip avg holding a 14-day rolling average of max precipitation in the region. 
+
+library(RcppRoll)
+
+Region<- unique(AllWY_max$Subregion)
+
+result <- list()
+
+for(i in 1:6){
+  m<- AllWY_max %>% filter(Subregion == Region[i])
+  m$d14_precipavg <- roll_mean(m$dailymax_precip, n=14, align = "center", fill = NA)
+  result[[i]]<- m
+}
+
+AllWY_max <- do.call(rbind, result)
+
+## Subset and define wet period for each region ##
+
+Region<- unique(AllWY_max$Subregion)
+
+result <- list() # empty list to store iterated results from loop
+
+for(i in 1:6){
+  # Work within only one region at a time
+  m<- AllWY_max %>% filter(Subregion == Region[i])
+  
+  # Define dates of 'wet' events
+  wet_event <- subset(m, d14_precipavg >= 0.05)
+  
+  # Also define 7 days past each 'wet' event as 'wet'
+  oneweek <- wet_event %>% 
+  group_by(Date) %>% 
+  complete(Date = seq.Date((Date), (Date+7), by = 'days'))
+  # Subset those dates from PRISM dataset, and define as "wet"
+  PRISM_wet <- subset(m, Date %in% oneweek$Date)
+  PRISM_wet$Seasonr <- "wet"
+  
+  # Subset all other dates from PRISM to define as "dry"
+  PRISM_dry <- subset(m, !(Date %in% oneweek$Date))
+  PRISM_dry$Seasonr <- "dry"
+  
+  # Store regional results in a list.
+  result[[i]]<-rbind(PRISM_wet, PRISM_dry)
+  } # End of loop
+
+AllWY_max <- do.call(rbind, result) # recombine all 6 result df
+```
+
+
+```{r}
+# Preview results
+
+# Add month column back on
+AllWY_max <- AllWY_max %>% mutate(Month = month(Date)) %>%
+  mutate(Month = as.factor(Month))
+
+## By Month and Subregion
+AllWY_max %>% 
+  group_by(Month, Seasonr, Subregion) %>%
+  summarize(Subregion = first(Subregion),
+            Sum = n()) %>%
+  pivot_wider(names_from = Seasonr,
+              names_repair = "check_unique",
+              # Values to fill columns
+              values_from = Sum) %>% 
+  mutate(Tot = wet + dry) %>%
+  mutate(Perc_Wet = round(wet/Tot*100, 2)) %>% 
+  select(!c(wet, dry, Tot))
+
+## By Month
+AllWY_max %>% 
+  group_by(Month, Seasonr) %>%
+  summarize(Sum = n()) %>%
+  pivot_wider(names_from = Seasonr,
+              names_repair = "check_unique",
+              # Values to fill columns
+              values_from = Sum) %>% 
+  mutate(Tot = wet + dry) %>%
+  mutate(Perc_Wet = round(wet/Tot*100, 2)) %>% 
+  select(!c(wet, dry, Tot))
+```
+
+#### Explore outcome
+
+Which months ended up with "wet" vs "dry" seasons?
+
+```{r}
+
+boxplot(dailymax_precip ~ Month, data = AllWY_max)
+
+AllWY_max %>% 
+  group_by(Month, Seasonr, Subregion) %>%
+  summarize(Subregion = first(Subregion),
+            Sum = n()) %>%
+  pivot_wider(names_from = Seasonr,
+              names_repair = "check_unique",
+              values_from = Sum) # Values to fill columns
+
+AllWY_max %>% 
+  group_by(Month, Seasonr) %>%
+  summarize(Sum = n()) %>%
+  pivot_wider(names_from = Seasonr,
+              names_repair = "check_unique",
+              values_from = Sum) # Values to fill columns
+
+AllWY_max %>% 
+  group_by(Month, Seasonr) %>%
+  summarize(Sum = n()) %>%
+  pivot_wider(names_from = Seasonr,
+              names_repair = "check_unique",
+              values_from = Sum) # Values to fill columns
+``` 
+```{r}
+p <- ggplot(AllWY_max, aes(x=Month, y=d14_precipavg, fill= Subregion))
+p + geom_boxplot()+
+  facet_wrap(~Subregion)
+```
+
+<br/>
+
+### Seasons via simple max precip
+
+This works fine, but seasons are poorly defined. Seems a rolling average would be better. 
 
 ```{r}
 # Subset and define wet period for each region
@@ -199,7 +341,7 @@ result <- list()
 for(i in 1:6){
   m<- AllWY_max %>% filter(Subregion == Region[i])
   
-  wet_event <- subset(m, max_precip >= 0.05)
+  wet_event <- subset(m, dailymax_precip >= 0.05)
 
   oneweek <- wet_event %>% 
   group_by(Date) %>% 
@@ -219,12 +361,14 @@ AllWY_max <- do.call(rbind, result)
 
 #### Explore outcome
 
+It's interesting that the average maximum precip doesn't seem to change by season, though the range does. 
+
 Which months ended up with "wet" vs "dry" seasons?
 
 ```{r}
 AllWY_max <- AllWY_max %>% mutate(Month = month(Date))
 
-boxplot(max_precip ~ Month, data = AllWY_max)
+boxplot(dailymax_precip ~ Month, data = AllWY_max, ylim = c(0, 3))
 
 AllWY_max %>% 
   group_by(Month, Season01, Subregion) %>%
@@ -232,97 +376,122 @@ AllWY_max %>%
             Sum = n()) %>%
   pivot_wider(names_from = Season01,
               names_repair = "check_unique",
-              values_from = Sum) # Values to fill columns
+              # Values to fill columns
+              values_from = Sum) %>% 
+  mutate(Tot = wet + dry) %>%
+  mutate(Perc_Wet = round(wet/Tot*100, 2)) %>% 
+  select(!c(wet, dry, Tot))
 
 AllWY_max %>% 
   group_by(Month, Season01) %>%
   summarize(Sum = n()) %>%
   pivot_wider(names_from = Season01,
               names_repair = "check_unique",
-              values_from = Sum) # Values to fill columns
+              # Values to fill columns
+              values_from = Sum) %>% 
+  mutate(Tot = wet + dry) %>%
+  mutate(Perc_Wet = round(wet/Tot*100, 2)) %>% 
+  select(!c(wet, dry, Tot))
 ```
 
+### Monthly Rainfall?
 
-### Seasons via rolling average
+Above, I found monthly rainfall totals for every PRISM location. From those, I then determined the maximum monthly rainfall total for each region. Therefore, the df "Monthly" contains one value (max monthly precip) for every combination of Month * Year * Subregion,
 
-I think that it may make most sense to allow a rolling average to be used to reduce incursions of "dry" season within "wet" seasons and vice versa. 
+We might choose to use this as a node, so I'm going to merge that result with the dailymax_precip daily data.
+
+
 
 ```{r}
+PRECIP_DATA <- left_join(AllWY_max, Monthly, by = c("WaterYear", "Month", "Subregion"), copy = FALSE) %>%
+  select(Subregion, Date, Month, WaterYear,
+         monthlymax_precip, dailymax_precip, d14_precipavg,
+         seasonr)
 
-library(RcppRoll)
-
-Region<- unique(AllWY_max$Subregion)
-
-result <- list()
-
-for(i in 1:6){
-  m<- AllWY_max %>% filter(Subregion == Region[i])
-  m$d14_precipavg <- roll_mean(m$max_precip, n=14, align = "center", fill = NA)
-  result[[i]]<- m
-}
-
-AllWY_max <- do.call(rbind, result)
+AllWY <- AllWY %>% mutate(Month = month(Date)) %>%
+  mutate(Month = as.factor(Month))
 ```
 
-Trying this with the same 7 day buffer, we find:
 
+<br/>
+<br/>
+
+## Save results
 ```{r}
-# Subset and define wet period for each region
+AllWY_max <- AllWY_max %>% 
+  rename(Season_05mm = Season01,
+         Season_14dAvg_05mm = Seasonr)
 
-Region<- unique(AllWY_max$Subregion)
-
-result <- list() # empty list to store iterated results from loop
-
-for(i in 1:6){
-  m<- AllWY_max %>% filter(Subregion == Region[i])
-  
-  wet_event <- subset(m, d14_precipavg >= 0.05)
-
-  oneweek <- wet_event %>% 
-  group_by(Date) %>% 
-  complete(Date = seq.Date((Date), (Date+7), by = 'days')) # fills 7 days beyond each 'wet' date
-
-  PRISM_wet <- subset(m, Date %in% oneweek$Date)
-  PRISM_wet$Seasonr <- "wet"
-  
-  PRISM_dry <- subset(m, !(Date %in% oneweek$Date))
-  PRISM_dry$Seasonr <- "dry"
-  
-  result[[i]]<-rbind(PRISM_wet, PRISM_dry)
-  }
-
-AllWY_max <- do.call(rbind, result) # recombine all 6 result df
 ```
-
-#### Explore outcome
-
-Which months ended up with "wet" vs "dry" seasons?
-
-```{r}
-AllWY_max <- AllWY_max %>% mutate(Month = month(Date))
-
-boxplot(max_precip ~ Month, data = AllWY_max)
-
-AllWY_max %>% 
-  group_by(Month, Seasonr, Subregion) %>%
-  summarize(Subregion = first(Subregion),
-            Sum = n()) %>%
-  pivot_wider(names_from = Seasonr,
-              names_repair = "check_unique",
-              values_from = Sum) # Values to fill columns
-
-AllWY_max %>% 
-  group_by(Month, Seasonr) %>%
-  summarize(Sum = n()) %>%
-  pivot_wider(names_from = Seasonr,
-              names_repair = "check_unique",
-              values_from = Sum) # Values to fill columns
-```
-
 
 ```{r}
 # Save results
-write.csv(x = AllWY_max, file = "Data/Output/USFE_Precip.csv", 
+write.csv(x = AllWY_max, 
+          file = "Data/Output/USFE_Precip.csv", 
           row.names = F)
 ```
 
+<br/>
+
+## Appendix
+
+Keeping code/ record of what I didn't end up using.
+
+### Seasons via rolling max
+
+A rolling MAXIMUM did not improve consistency of wet:dry, just increased the total number of Wet. Not including here. 
+
+```{r, eval = F}
+
+library(RcppRoll)
+
+# Use ROLL_MAX to assign each date the MAX precip over a 14-day window
+    
+    Region<- unique(AllWY_max$Subregion)
+    
+    result <- list()
+    
+    for(i in 1:6){
+      m<- AllWY_max %>% filter(Subregion == Region[i])
+      m$d14_precipmax <- roll_max(m$dailymax_precip, n=14, align = "center", fill = NA)
+      result[[i]]<- m
+    }
+    
+    AllWY_max <- do.call(rbind, result)
+
+
+# Subset and define wet period for each region.
+    # Here, use the same 7-day buffer on each wet event. Could change?
+    
+    Region<- unique(AllWY_max$Subregion)
+    
+    result <- list() # empty list to store iterated results from loop
+    
+    for(i in 1:6){
+      m<- AllWY_max %>% filter(Subregion == Region[i])
+      
+      wet_event <- subset(m, d14_precipmax >= 0.03)
+    
+      oneweek <- wet_event %>% 
+      group_by(Date) %>% 
+      complete(Date = seq.Date((Date), (Date+7), by = 'days')) 
+      # ^ fills 7 days beyond each 'wet' date
+    
+      PRISM_wet <- subset(m, Date %in% oneweek$Date)
+      PRISM_wet$Seasonm <- "wet"
+      
+      PRISM_dry <- subset(m, !(Date %in% oneweek$Date))
+      PRISM_dry$Seasonm <- "dry"
+      
+      result[[i]]<-rbind(PRISM_wet, PRISM_dry)
+      }
+    
+    AllWY_max <- do.call(rbind, result) # recombine all 6 result df
+    
+AllWY_max %>% 
+  group_by(Month, Seasonr) %>%
+  summarize(Sum = n()) %>%
+  pivot_wider(names_from = Seasonm,
+              names_repair = "check_unique",
+              values_from = Sum) # Values to fill columns
+```

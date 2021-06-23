@@ -35,6 +35,7 @@ library(zoo)
 library(lubridate)
 library(ggplot2)
 ```
+
 ## Load Data
 
 ### Precipitation
@@ -52,7 +53,6 @@ The spatial resolution of the data is 4km, and it was sourced from the AN81d dat
 
 
 <br/>
-
 
 ### USFE Risk Regions
 
@@ -74,7 +74,7 @@ USFE.RiskRegions <- unzip_shape(USFE.RiskRegions.z) # CRS is WGS 84
 ```
 
 ```
-## Reading layer `RiskRegions_DWSC_Update_9292020' from data source `C:\Users\Erika\AppData\Local\Temp\Rtmpqe6EfM\file15504c4a280\RiskRegions_DWSC_Update_9292020.shp' using driver `ESRI Shapefile'
+## Reading layer `RiskRegions_DWSC_Update_9292020' from data source `C:\Users\Erika\AppData\Local\Temp\RtmpI5Ve7T\file119c5adb2d25\RiskRegions_DWSC_Update_9292020.shp' using driver `ESRI Shapefile'
 ## Simple feature collection with 6 features and 6 fields
 ## geometry type:  POLYGON
 ## dimension:      XYZ
@@ -83,18 +83,6 @@ USFE.RiskRegions <- unzip_shape(USFE.RiskRegions.z) # CRS is WGS 84
 ## geographic CRS: WGS 84
 ```
 
-<br/>
-
-### CEDENSURF
-
-I have read in the combined modified CEDEN and SURF data, but I believe that it may be most useful to jump right to the wide format data...
-
-
-```r
-CEDENSURFMod <- fread("https://github.com/WWU-IETC-R-Collab/CEDENSURF-mod/raw/main/Data/Output/CEDENSURFMod.csv")
-```
-
-<br/>
 <br/>
 
 ## Data Prep
@@ -117,7 +105,7 @@ rm(df2010, df2011, df2012, df2013,
    df2014, df2015, df2016,df2017,
    df2018, df2019) # clean up global environment
 
-## Modify data
+## Correct Date Format
 
 AllWY<- AllWY %>%
   mutate(Date = as.Date(AllWY$Date, "%m/%d/%Y")) %>%
@@ -145,7 +133,17 @@ AllWY <- AllWY.sf %>% st_set_geometry(NULL)
 AllWY_max <- AllWY %>%
   group_by(Date, Subregion, WaterYear) %>%
   summarize(max_precip = max(ppt_in))
+
+# Add month column
+AllWY_max <- AllWY_max %>% mutate(Month = month(Date)) %>%
+  mutate(Month = as.factor(Month))
+
+# Clean up workspace
+rm(list=setdiff(ls(), c("AllWY_max")))
 ```
+
+<br/>
+<br/>
 
 ## Define Seasons
 
@@ -155,25 +153,290 @@ In each region I observed, November - March appeared to be the wettest seasons
 
 According to Alameda WETS tables, during those months
 
-- At the inland edge of the estuary, average monthly precip is only 2.5-3" (< 0.1" per day)
+- At the inland edge of the estuary, average monthly precip is only 2 - 3" (< 0.06" per day)
 
-- At the SE border of our study area, average monthly precip is only 1.5 - 2" (<0.07"/day)
+- At the SE border of our study area, average monthly precip is only 1 - 2" (<0.03"/day)
 
 *Question: what are stronger predictors of water quality parameters?*
 
 Daily water volume definitions
-A. Wet being >0.1" in a day *(current)*
-B. Wet being >0.2" in a day 
+A. Wet being >0.05" in a day *(current)*
+B. Wet being >0.1" in a day 
 
 Date buffer definitions
 A. 7 days  *(current)*
 B. 3 days
 
-**Current process**
-
 Moving forward with Wet being within 7 days of a day with rain event >= 0.05", I added a column to CEDENSURF defining Season.
 
-By changing Stevens code to be a loop, it allowed wet vs dry season to be defined differently for each region on a given date.
+By changing Stevens code to be a loop, it allowed wet vs dry season to be defined differently for each region on a given date (since rainfall varies across the region)
+
+### Seasons via rolling average
+
+I think that it may make most sense to allow a rolling average to be used to reduce incursions of "dry" season within "wet" seasons and vice versa.
+
+The following code does three things
+1. Calculate a 14-day rolling average (center window) of precipitation within each region
+2. Repeat the same 0.05 mm precip definition as a 'wet event', and added the same 7 day buffer to each wet event.
+
+
+```r
+## Create column d14_precip avg holding a 14-day rolling average of max precipitation in the region. 
+
+library(RcppRoll)
+```
+
+```
+## Warning: package 'RcppRoll' was built under R version 4.0.5
+```
+
+```r
+Region<- unique(AllWY_max$Subregion)
+
+result <- list()
+
+for(i in 1:6){
+  m<- AllWY_max %>% filter(Subregion == Region[i])
+  m$d14_precipavg <- roll_mean(m$max_precip, n=14, align = "center", fill = NA)
+  result[[i]]<- m
+}
+
+AllWY_max <- do.call(rbind, result)
+
+## Subset and define wet period for each region ##
+
+Region<- unique(AllWY_max$Subregion)
+
+result <- list() # empty list to store iterated results from loop
+
+for(i in 1:6){
+  # Work within only one region at a time
+  m<- AllWY_max %>% filter(Subregion == Region[i])
+  
+  # Define dates of 'wet' events
+  wet_event <- subset(m, d14_precipavg >= 0.05)
+  
+  # Also define 7 days past each 'wet' event as 'wet'
+  oneweek <- wet_event %>% 
+  group_by(Date) %>% 
+  complete(Date = seq.Date((Date), (Date+7), by = 'days'))
+  # Subset those dates from PRISM dataset, and define as "wet"
+  PRISM_wet <- subset(m, Date %in% oneweek$Date)
+  PRISM_wet$Seasonr <- "wet"
+  
+  # Subset all other dates from PRISM to define as "dry"
+  PRISM_dry <- subset(m, !(Date %in% oneweek$Date))
+  PRISM_dry$Seasonr <- "dry"
+  
+  # Store regional results in a list.
+  result[[i]]<-rbind(PRISM_wet, PRISM_dry)
+  } # End of loop
+
+AllWY_max <- do.call(rbind, result) # recombine all 6 result df
+```
+
+
+
+```r
+# Preview results
+
+## By Month and Subregion
+AllWY_max %>% 
+  group_by(Month, Seasonr, Subregion) %>%
+  summarize(Subregion = first(Subregion),
+            Sum = n()) %>%
+  pivot_wider(names_from = Seasonr,
+              names_repair = "check_unique",
+              # Values to fill columns
+              values_from = Sum) %>% 
+  mutate(Tot = wet + dry) %>%
+  mutate(Perc_Wet = round(wet/Tot*100, 2)) %>% 
+  select(!c(wet, dry, Tot))
+```
+
+```
+## `summarise()` has grouped output by 'Month', 'Seasonr'. You can override using the `.groups` argument.
+```
+
+```
+## # A tibble: 72 x 3
+## # Groups:   Month [12]
+##    Month Subregion        Perc_Wet
+##    <fct> <chr>               <dbl>
+##  1 10    Central Delta        31.9
+##  2 10    Confluence           31.6
+##  3 10    North Delta          33.2
+##  4 10    Sacramento River     33.6
+##  5 10    South Delta          26.8
+##  6 10    Suisun Bay           32.9
+##  7 11    Central Delta        65  
+##  8 11    Confluence           58.3
+##  9 11    North Delta          67  
+## 10 11    Sacramento River     66.3
+## # ... with 62 more rows
+```
+
+```r
+## By Month
+AllWY_max %>% 
+  group_by(Month, Seasonr) %>%
+  summarize(Sum = n()) %>%
+  pivot_wider(names_from = Seasonr,
+              names_repair = "check_unique",
+              # Values to fill columns
+              values_from = Sum) %>% 
+  mutate(Tot = wet + dry) %>%
+  mutate(Perc_Wet = round(wet/Tot*100, 2)) %>% 
+  select(!c(wet, dry, Tot))
+```
+
+```
+## `summarise()` has grouped output by 'Month'. You can override using the `.groups` argument.
+```
+
+```
+## # A tibble: 12 x 2
+## # Groups:   Month [12]
+##    Month Perc_Wet
+##    <fct>    <dbl>
+##  1 10       31.7 
+##  2 11       63.7 
+##  3 12       68.0 
+##  4 1        64.2 
+##  5 2        69.2 
+##  6 3        72.3 
+##  7 4        66   
+##  8 5        19.1 
+##  9 6         7.06
+## 10 7         0.65
+## 11 8        NA   
+## 12 9         2.44
+```
+
+#### Explore outcome
+
+Which months ended up with "wet" vs "dry" seasons?
+
+
+```r
+boxplot(max_precip ~ Month, data = AllWY_max)
+```
+
+![](Precipitation_files/figure-html/unnamed-chunk-8-1.png)<!-- -->
+
+```r
+AllWY_max %>% 
+  group_by(Month, Seasonr, Subregion) %>%
+  summarize(Subregion = first(Subregion),
+            Sum = n()) %>%
+  pivot_wider(names_from = Seasonr,
+              names_repair = "check_unique",
+              values_from = Sum) # Values to fill columns
+```
+
+```
+## `summarise()` has grouped output by 'Month', 'Seasonr'. You can override using the `.groups` argument.
+```
+
+```
+## # A tibble: 72 x 4
+## # Groups:   Month [12]
+##    Month Subregion          dry   wet
+##    <fct> <chr>            <int> <int>
+##  1 10    Central Delta      211    99
+##  2 10    Confluence         212    98
+##  3 10    North Delta        207   103
+##  4 10    Sacramento River   206   104
+##  5 10    South Delta        227    83
+##  6 10    Suisun Bay         208   102
+##  7 11    Central Delta      105   195
+##  8 11    Confluence         125   175
+##  9 11    North Delta         99   201
+## 10 11    Sacramento River   101   199
+## # ... with 62 more rows
+```
+
+```r
+AllWY_max %>% 
+  group_by(Month, Seasonr) %>%
+  summarize(Sum = n()) %>%
+  pivot_wider(names_from = Seasonr,
+              names_repair = "check_unique",
+              values_from = Sum) # Values to fill columns
+```
+
+```
+## `summarise()` has grouped output by 'Month'. You can override using the `.groups` argument.
+```
+
+```
+## # A tibble: 12 x 3
+## # Groups:   Month [12]
+##    Month   dry   wet
+##    <fct> <int> <int>
+##  1 10     1271   589
+##  2 11      653  1147
+##  3 12      595  1265
+##  4 1       665  1195
+##  5 2       521  1171
+##  6 3       515  1345
+##  7 4       612  1188
+##  8 5      1505   355
+##  9 6      1673   127
+## 10 7      1848    12
+## 11 8      1860    NA
+## 12 9      1756    44
+```
+
+```r
+AllWY_max %>% 
+  group_by(Month, Seasonr) %>%
+  summarize(Sum = n()) %>%
+  pivot_wider(names_from = Seasonr,
+              names_repair = "check_unique",
+              values_from = Sum) # Values to fill columns
+```
+
+```
+## `summarise()` has grouped output by 'Month'. You can override using the `.groups` argument.
+```
+
+```
+## # A tibble: 12 x 3
+## # Groups:   Month [12]
+##    Month   dry   wet
+##    <fct> <int> <int>
+##  1 10     1271   589
+##  2 11      653  1147
+##  3 12      595  1265
+##  4 1       665  1195
+##  5 2       521  1171
+##  6 3       515  1345
+##  7 4       612  1188
+##  8 5      1505   355
+##  9 6      1673   127
+## 10 7      1848    12
+## 11 8      1860    NA
+## 12 9      1756    44
+```
+
+```r
+p <- ggplot(AllWY_max, aes(x=Month, y=d14_precipavg, fill= Subregion))
+p + geom_boxplot()+
+  facet_wrap(~Subregion)
+```
+
+```
+## Warning: Removed 78 rows containing non-finite values (stat_boxplot).
+```
+
+![](Precipitation_files/figure-html/unnamed-chunk-9-1.png)<!-- -->
+
+<br/>
+
+### Seasons via simple max precip
+
+This works fine, but seasons are poorly defined. Seems a rolling average would be better. 
 
 
 ```r
@@ -206,16 +469,18 @@ AllWY_max <- do.call(rbind, result)
 
 #### Explore outcome
 
+It's interesting that the average maximum precip doesn't seem to change by season, though the range does. 
+
 Which months ended up with "wet" vs "dry" seasons?
 
 
 ```r
 AllWY_max <- AllWY_max %>% mutate(Month = month(Date))
 
-boxplot(max_precip ~ Month, data = AllWY_max)
+boxplot(max_precip ~ Month, data = AllWY_max, ylim = c(0, 3))
 ```
 
-![](Precipitation_files/figure-html/unnamed-chunk-8-1.png)<!-- -->
+![](Precipitation_files/figure-html/unnamed-chunk-11-1.png)<!-- -->
 
 ```r
 AllWY_max %>% 
@@ -224,7 +489,11 @@ AllWY_max %>%
             Sum = n()) %>%
   pivot_wider(names_from = Season01,
               names_repair = "check_unique",
-              values_from = Sum) # Values to fill columns
+              # Values to fill columns
+              values_from = Sum) %>% 
+  mutate(Tot = wet + dry) %>%
+  mutate(Perc_Wet = round(wet/Tot*100, 2)) %>% 
+  select(!c(wet, dry, Tot))
 ```
 
 ```
@@ -232,20 +501,20 @@ AllWY_max %>%
 ```
 
 ```
-## # A tibble: 72 x 4
+## # A tibble: 72 x 3
 ## # Groups:   Month [12]
-##    Month Subregion          dry   wet
-##    <dbl> <chr>            <int> <int>
-##  1     1 Central Delta      113   197
-##  2     1 Confluence         122   188
-##  3     1 North Delta        119   191
-##  4     1 Sacramento River   115   195
-##  5     1 South Delta        114   196
-##  6     1 Suisun Bay         117   193
-##  7     2 Central Delta      104   178
-##  8     2 Confluence          99   183
-##  9     2 North Delta        107   175
-## 10     2 Sacramento River   108   174
+##    Month Subregion        Perc_Wet
+##    <dbl> <chr>               <dbl>
+##  1     1 Central Delta        63.6
+##  2     1 Confluence           60.6
+##  3     1 North Delta          61.6
+##  4     1 Sacramento River     62.9
+##  5     1 South Delta          63.2
+##  6     1 Suisun Bay           62.3
+##  7     2 Central Delta        63.1
+##  8     2 Confluence           64.9
+##  9     2 North Delta          62.1
+## 10     2 Sacramento River     61.7
 ## # ... with 62 more rows
 ```
 
@@ -255,7 +524,11 @@ AllWY_max %>%
   summarize(Sum = n()) %>%
   pivot_wider(names_from = Season01,
               names_repair = "check_unique",
-              values_from = Sum) # Values to fill columns
+              # Values to fill columns
+              values_from = Sum) %>% 
+  mutate(Tot = wet + dry) %>%
+  mutate(Perc_Wet = round(wet/Tot*100, 2)) %>% 
+  select(!c(wet, dry, Tot))
 ```
 
 ```
@@ -263,311 +536,104 @@ AllWY_max %>%
 ```
 
 ```
-## # A tibble: 12 x 3
+## # A tibble: 12 x 2
 ## # Groups:   Month [12]
-##    Month   dry   wet
-##    <dbl> <int> <int>
-##  1     1   700  1160
-##  2     2   619  1073
-##  3     3   394  1466
-##  4     4   563  1237
-##  5     5  1194   666
-##  6     6  1433   367
-##  7     7  1801    59
-##  8     8  1852     8
-##  9     9  1608   192
-## 10    10  1206   654
-## 11    11   543  1257
-## 12    12   427  1433
+##    Month Perc_Wet
+##    <dbl>    <dbl>
+##  1     1    62.4 
+##  2     2    63.4 
+##  3     3    78.8 
+##  4     4    68.7 
+##  5     5    35.8 
+##  6     6    20.4 
+##  7     7     3.17
+##  8     8     0.43
+##  9     9    10.7 
+## 10    10    35.2 
+## 11    11    69.8 
+## 12    12    77.0
 ```
 
 
-### Seasons via rolling average
+<br/>
+<br/>
 
-I think that it may make most sense to allow a rolling average to be used to reduce incursions of "dry" season within "wet" seasons and vice versa. 
+## Save results
+
+```r
+AllWY_max <- AllWY_max %>% rename(Season_05mm = Season01,
+                                  Season_14dAvg_05mm = Seasonr)
+```
+
+
+```r
+# Save results
+write.csv(x = AllWY_max, 
+          file = "Data/Output/USFE_Precip.csv", 
+          row.names = F)
+```
+
+<br/>
+
+## Appendix
+
+Keeping code/ record of what I didn't end up using.
+
+### Seasons via rolling max
+
+A rolling MAXIMUM did not improve consistency of wet:dry, just increased the total number of Wet. Not including here. 
 
 
 ```r
 library(RcppRoll)
-```
 
-```
-## Warning: package 'RcppRoll' was built under R version 4.0.5
-```
-
-```r
-Region<- unique(AllWY_max$Subregion)
-
-result <- list()
-
-for(i in 1:6){
-  m<- AllWY_max %>% filter(Subregion == Region[i])
-  m$d14_precipavg <- roll_mean(m$max_precip, n=14, align = "center", fill = NA)
-  result[[i]]<- m
-}
-
-AllWY_max <- do.call(rbind, result)
-```
-
-Trying this with the same 7 day buffer, we find:
+# Use ROLL_MAX to assign each date the MAX precip over a 14-day window
+    
+    Region<- unique(AllWY_max$Subregion)
+    
+    result <- list()
+    
+    for(i in 1:6){
+      m<- AllWY_max %>% filter(Subregion == Region[i])
+      m$d14_precipmax <- roll_max(m$max_precip, n=14, align = "center", fill = NA)
+      result[[i]]<- m
+    }
+    
+    AllWY_max <- do.call(rbind, result)
 
 
-```r
-# Subset and define wet period for each region
-
-Region<- unique(AllWY_max$Subregion)
-
-result <- list() # empty list to store iterated results from loop
-
-for(i in 1:6){
-  m<- AllWY_max %>% filter(Subregion == Region[i])
-  
-  wet_event <- subset(m, d14_precipavg >= 0.05)
-
-  oneweek <- wet_event %>% 
-  group_by(Date) %>% 
-  complete(Date = seq.Date((Date), (Date+7), by = 'days')) # fills 7 days beyond each 'wet' date
-
-  PRISM_wet <- subset(m, Date %in% oneweek$Date)
-  PRISM_wet$Seasonr <- "wet"
-  
-  PRISM_dry <- subset(m, !(Date %in% oneweek$Date))
-  PRISM_dry$Seasonr <- "dry"
-  
-  result[[i]]<-rbind(PRISM_wet, PRISM_dry)
-  }
-
-AllWY_max <- do.call(rbind, result) # recombine all 6 result df
-```
-
-#### Explore outcome
-
-Which months ended up with "wet" vs "dry" seasons?
-
-
-```r
-AllWY_max <- AllWY_max %>% mutate(Month = month(Date))
-
-boxplot(max_precip ~ Month, data = AllWY_max)
-```
-
-![](Precipitation_files/figure-html/unnamed-chunk-11-1.png)<!-- -->
-
-```r
-AllWY_max %>% 
-  group_by(Month, Seasonr, Subregion) %>%
-  summarize(Subregion = first(Subregion),
-            Sum = n()) %>%
-  pivot_wider(names_from = Seasonr,
-              names_repair = "check_unique",
-              values_from = Sum) # Values to fill columns
-```
-
-```
-## `summarise()` has grouped output by 'Month', 'Seasonr'. You can override using the `.groups` argument.
-```
-
-```
-## # A tibble: 72 x 4
-## # Groups:   Month [12]
-##    Month Subregion          dry   wet
-##    <dbl> <chr>            <int> <int>
-##  1     1 Central Delta       96   214
-##  2     1 Confluence         100   210
-##  3     1 North Delta        109   201
-##  4     1 Sacramento River   102   208
-##  5     1 South Delta        114   196
-##  6     1 Suisun Bay          93   217
-##  7     2 Central Delta       68   214
-##  8     2 Confluence          63   219
-##  9     2 North Delta         68   214
-## 10     2 Sacramento River    66   216
-## # ... with 62 more rows
-```
-
-```r
+# Subset and define wet period for each region.
+    # Here, use the same 7-day buffer on each wet event. Could change?
+    
+    Region<- unique(AllWY_max$Subregion)
+    
+    result <- list() # empty list to store iterated results from loop
+    
+    for(i in 1:6){
+      m<- AllWY_max %>% filter(Subregion == Region[i])
+      
+      wet_event <- subset(m, d14_precipmax >= 0.03)
+    
+      oneweek <- wet_event %>% 
+      group_by(Date) %>% 
+      complete(Date = seq.Date((Date), (Date+7), by = 'days')) 
+      # ^ fills 7 days beyond each 'wet' date
+    
+      PRISM_wet <- subset(m, Date %in% oneweek$Date)
+      PRISM_wet$Seasonm <- "wet"
+      
+      PRISM_dry <- subset(m, !(Date %in% oneweek$Date))
+      PRISM_dry$Seasonm <- "dry"
+      
+      result[[i]]<-rbind(PRISM_wet, PRISM_dry)
+      }
+    
+    AllWY_max <- do.call(rbind, result) # recombine all 6 result df
+    
 AllWY_max %>% 
   group_by(Month, Seasonr) %>%
   summarize(Sum = n()) %>%
-  pivot_wider(names_from = Seasonr,
+  pivot_wider(names_from = Seasonm,
               names_repair = "check_unique",
               values_from = Sum) # Values to fill columns
 ```
-
-```
-## `summarise()` has grouped output by 'Month'. You can override using the `.groups` argument.
-```
-
-```
-## # A tibble: 12 x 3
-## # Groups:   Month [12]
-##    Month   dry   wet
-##    <dbl> <int> <int>
-##  1     1   614  1246
-##  2     2   406  1286
-##  3     3   303  1557
-##  4     4   454  1346
-##  5     5  1396   464
-##  6     6  1548   252
-##  7     7  1757   103
-##  8     8  1854     6
-##  9     9  1704    96
-## 10    10  1221   639
-## 11    11   704  1096
-## 12    12   392  1468
-```
-
-## Prepare for NETICA {.tabset}
-
-Tabs below have the following process repeated for three datasets: two files prepared for the final NETICA - one df for water and one df for sediment, and a small subset used to test the format compatibility with Netica.
-
-The process used to prepare the data is:
-
-1. Join Seasons data with the wide format CEDENSURF (created via steps documented in the data-splitting rmd). 
-
-2. Reformat to meet requirements for Netica
-
-    Values should match how they will appear in NETICA
-    
-    * Region - change to names w/o spaces
-    * NA --> *
-
-3. Save as csv, then save-as tab delimited txt file (*.txt)
-
-(Writing directly to txt file does not play nice with Netica... Save as CSV then "save-as" txt)
-
-### Sediment
-
-
-```r
-# Load CEDENSURF Data (wide format)
-Sed_Wide <- fread("https://github.com/WWU-IETC-R-Collab/CEDENSURF-mod/raw/main/Data/Output/Allsed.Wide.csv") 
-    
-# Join CEDENSURF to AllWY_max
-CS_PRISM<- merge(Sed_Wide, AllWY_max, by = c("Date", "Subregion"))
-```
-
-
-```r
-# Merge with season data
-
-CS_PRISM<- merge(Sed_Wide, AllWY_max, by = c("Date", "Subregion"))
-
-# Rename regions
-
-CS_PRISM <- CS_PRISM %>% 
-  mutate(Region = Subregion) %>%
-  mutate(Region = str_replace(Region, "Central Delta", "Central")) %>%
-  mutate(Region = str_replace(Region, "North Delta", "North")) %>%
-  mutate(Region = str_replace(Region, "Sacramento River", "Sacramento")) %>%
-  mutate(Region = str_replace(Region, "South Delta", "South")) %>%
-  mutate(Region = str_replace(Region, "Suisun Bay", "Suisun"))
-
-# Remove unnecessary columns
-
-ForNetica <- CS_PRISM %>% select(!c(Subregion, Latitude, Longitude, Date, WaterYear, max_precip, d14_precipavg))
-
-# Replace NA with *, which is how Netica deals with NA
-
-ForNetica <- mutate_all(ForNetica, ~replace(., is.na(.), "*"))
-
-# Save
-
-write.csv(x = ForNetica, file = "Data/Output/AllSed_ForNetica.csv", 
-          row.names = F)
-```
-
-### Water 
-
-```r
-## For example using Water Quality Parameters Subset and my limited-mode netica, I used just the WQP.Wide.water dataset:
-
-# Load CEDENSURF Data (wide format)
-Water_Wide <- fread("https://github.com/WWU-IETC-R-Collab/CEDENSURF-mod/raw/main/Data/Output/Allwater.Wide.csv") 
-    
-# Join CEDENSURF to AllWY_max
-CS_PRISM<- merge(Water_Wide, AllWY_max, by = c("Date", "Subregion"))
-```
-
-
-```r
-# Merge with season data
-
-CS_PRISM<- merge(Water_Wide, AllWY_max, by = c("Date", "Subregion"))
-
-# Rename regions
-
-CS_PRISM <- CS_PRISM %>% 
-  mutate(Region = Subregion) %>%
-  mutate(Region = str_replace(Region, "Central Delta", "Central")) %>%
-  mutate(Region = str_replace(Region, "North Delta", "North")) %>%
-  mutate(Region = str_replace(Region, "Sacramento River", "Sacramento")) %>%
-  mutate(Region = str_replace(Region, "South Delta", "South")) %>%
-  mutate(Region = str_replace(Region, "Suisun Bay", "Suisun"))
-
-# Remove unnecessary columns
-
-ForNetica <- CS_PRISM %>% select(!c(Subregion, Latitude, Longitude, Date, WaterYear, max_precip, d14_precipavg))
-
-# Replace NA with *, which is how Netica deals with NA
-
-ForNetica <- mutate_all(ForNetica, ~replace(., is.na(.), "*"))
-
-# Save
-
-write.csv(x = ForNetica, file = "Data/Output/AllWater_ForNetica.csv", 
-          row.names = F)
-
-# Writing directly to txt file does not play nice with Netica... Save as CSV then "save-as" txt
-
-# write.table(x = ForNetica, file = "Data/Output/AllWater_ForNetica.txt", sep = "")
-```
-
-### Mini 
-
-```r
-## For example using Water Quality Parameters Subset and my limited-mode netica, I used just the WQP.Wide.water dataset:
-
-# Load CEDENSURF Data (wide format)
-WQ_Wide <- fread("https://github.com/WWU-IETC-R-Collab/CEDENSURF-mod/raw/main/Data/Output/WideSubsets/WQP.Wide.water.csv") 
-    
-# Join CEDENSURF to AllWY_max
-CS_PRISM<- merge(WQ_Wide, AllWY_max, by = c("Date", "Subregion"))
-```
-
-
-```r
-# Merge with season data
-
-CS_PRISM<- merge(WQ_Wide, AllWY_max, by = c("Date", "Subregion"))
-
-# Rename regions
-
-CS_PRISM <- CS_PRISM %>% 
-  mutate(Region = Subregion) %>%
-  mutate(Region = str_replace(Region, "Central Delta", "Central")) %>%
-  mutate(Region = str_replace(Region, "North Delta", "North")) %>%
-  mutate(Region = str_replace(Region, "Sacramento River", "Sacramento")) %>%
-  mutate(Region = str_replace(Region, "South Delta", "South")) %>%
-  mutate(Region = str_replace(Region, "Suisun Bay", "Suisun"))
-
-# Remove unnecessary columns
-
-ForNetica <- CS_PRISM %>% select(!c(Subregion, Latitude, Longitude, Date, WaterYear, max_precip, d14_precipavg))
-
-# Replace NA with *, which is how Netica deals with NA
-
-ForNetica <- mutate_all(ForNetica, ~replace(., is.na(.), "*"))
-
-# Save
-
-write.csv(x = ForNetica, file = "Data/Output/WQP_ForNetica.csv", 
-          row.names = F)
-
-# Writing directly to txt file does not play nice with Netica... Save as CSV then "save-as" txt
-
-# write.table(x = ForNetica, file = "Data/Output/WQP_ForNetica.txt", sep = "")
-```
-
-**On a Windows, Netica should be able to use the csv file directly. I found that in order for it to allocate continuously variables appropriately into the designated bins (ie: when MANY nodes were in one document), it needed to be a txt file. Re-saving the csv as txt worked fine, I also added code here to write directly to txt. **
-

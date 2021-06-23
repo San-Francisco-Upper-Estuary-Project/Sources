@@ -43,7 +43,9 @@ unzip_shape <- function(InputShapeZip){
   sf::st_read(shapefile.out) # Reads shapefile as sf object
 }
 
-USFE.RiskRegions <- unzip_shape(USFE.RiskRegions.z) # CRS is WGS 84
+# CRS is WGS 84. Transform to NAD 83
+USFE.RiskRegions <- unzip_shape(USFE.RiskRegions.z) %>%
+  st_transform(., "NAD83") 
 ```
 
 #### Source Data
